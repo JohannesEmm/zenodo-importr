@@ -31,7 +31,34 @@ ui <- dashboardPage(
                     helpText("Note: Only the first entry from the BibTeX file will be uploaded."),
                     conditionalPanel(
                       condition = "output.bib_loaded",
-                      helpText("✓ Publication loaded and ready for upload."),
+                      conditionalPanel(
+                        condition = "output.show_duplicate_warning",
+                        div(class = "alert alert-danger", role = "alert",
+                            style = "margin: 15px 0;",
+                            h4(class = "alert-heading", "❌ Duplicate Found!"),
+                            p("This publication already exists on Zenodo:"),
+                            uiOutput("duplicate_info"),
+                            hr(),
+                            p(class = "mb-0", strong("Upload is disabled to prevent duplicates."))
+                        )
+                      ),
+                      conditionalPanel(
+                        condition = "output.show_safe_upload",
+                        div(class = "alert alert-success", role = "alert",
+                            style = "margin: 15px 0;",
+                            h4(class = "alert-heading", "✅ Safe to Upload!"),
+                            p(class = "mb-0", "This DOI was not found on Zenodo. You can proceed with the upload.")
+                        )
+                      ),
+                      conditionalPanel(
+                        condition = "output.show_no_doi",
+                        div(class = "alert alert-warning", role = "alert",
+                            style = "margin: 15px 0;",
+                            h4(class = "alert-heading", "⚠️ No DOI Found"),
+                            p(class = "mb-0", "This publication has no DOI. Upload will proceed without duplicate checking.")
+                        )
+                      ),
+                      helpText("✓ Publication loaded and DOI checked automatically."),
                       DT::dataTableOutput("bib_table")
                     )
                 )
@@ -41,13 +68,13 @@ ui <- dashboardPage(
                     tags$head(tags$style(HTML("
                       .shiny-file-input-progress {display: none;}
                     "))),
-                    fileInput("pdf_files", "Choose PDF File", 
+                    fileInput("pdf_files", "Choose PDF File(s)", 
                               accept = ".pdf", 
-                              multiple = FALSE),
-                    helpText("Upload a PDF file to attach to the publication."),
+                              multiple = TRUE),
+                    helpText("Upload PDF files. If multiple files are selected, only the first one will be attached to the publication."),
                     conditionalPanel(
                       condition = "output.pdf_loaded",
-                      helpText("✓ PDF file loaded and ready for upload."),
+                      helpText("✓ PDF file ready for upload with the publication."),
                       DT::dataTableOutput("pdf_table")
                     )
                 )
@@ -73,7 +100,17 @@ ui <- dashboardPage(
                     textAreaInput("ec_grants", "EC Grant Numbers (one per line, optional)", 
                                   placeholder = "e.g., 101022622"),
                     helpText("Enter European Commission grant numbers. These must exist in Zenodo's grants database."),
-                    actionButton("upload_btn", "Upload to Zenodo", class = "btn-success")
+                    conditionalPanel(
+                      condition = "!output.upload_disabled",
+                      actionButton("upload_btn", "Upload to Zenodo", class = "btn-success")
+                    ),
+                    conditionalPanel(
+                      condition = "output.upload_disabled",
+                      tags$button("Upload Disabled - Duplicate Found", 
+                                  class = "btn btn-danger", 
+                                  disabled = "disabled",
+                                  style = "width: 100%;")
+                    )
                 ),
                 box(title = "Step 4: Results", status = "info", solidHeader = TRUE, width = 6,
                     verbatimTextOutput("upload_results"),
@@ -110,6 +147,11 @@ server <- function(input, output, session) {
   options(shiny.maxRequestSize = -1)
   
   values <- reactiveValues()
+  
+  # Initialize reactive values
+  values$doi_check_results <- ""
+  values$duplicate_found <- FALSE
+  values$zenodo_record_url <- ""
   
   # Check if BibTeX is loaded
   output$bib_loaded <- reactive({
@@ -295,6 +337,79 @@ server <- function(input, output, session) {
                               
                               resp <- req_perform(req)
                               return(resp_status(resp) == 202)
+                            },
+                            
+                            search_doi = function(doi) {
+                              cat("DEBUG: === DOI SEARCH ===\n")
+                              cat("DEBUG: Searching for DOI:", doi, "\n")
+                              
+                              if (is.null(doi) || doi == "" || is.na(doi)) {
+                                return(list(found = FALSE, message = "No DOI available in publication"))
+                              }
+                              
+                              tryCatch({
+                                # Clean DOI - remove any prefix
+                                clean_doi <- gsub("^(doi:|DOI:)?\\s*", "", doi)
+                                search_query <- paste0('doi:"', clean_doi, '"')
+                                
+                                search_url <- paste0(self$baseurl, "/records")
+                                
+                                # Public search - no authentication needed
+                                req <- request(search_url)
+                                req <- req_url_query(req, q = search_query, size = 10)
+                                
+                                cat("DEBUG: Search URL:", search_url, "\n")
+                                cat("DEBUG: Search query:", search_query, "\n")
+                                
+                                resp <- req_perform(req)
+                                status <- resp_status(resp)
+                                
+                                if (status == 200) {
+                                  search_results <- resp_body_json(resp)
+                                  total_hits <- search_results$hits$total
+                                  
+                                  cat("DEBUG: Search completed. Total hits:", total_hits, "\n")
+                                  
+                                  if (total_hits > 0) {
+                                    # Found existing record(s)
+                                    first_hit <- search_results$hits$hits[[1]]
+                                    record_id <- first_hit$id
+                                    record_title <- first_hit$metadata$title
+                                    record_url <- paste0("https://zenodo.org/record/", record_id)
+                                    
+                                    authors <- ""
+                                    if (!is.null(first_hit$metadata$creators)) {
+                                      author_names <- sapply(first_hit$metadata$creators, function(creator) creator$name)
+                                      authors <- paste(author_names[1:min(2, length(author_names))], collapse = ", ")
+                                      if (length(author_names) > 2) authors <- paste0(authors, " et al.")
+                                    }
+                                    
+                                    cat("DEBUG: Found existing record:", record_id, "\n")
+                                    
+                                    return(list(
+                                      found = TRUE,
+                                      message = "Duplicate found on Zenodo",
+                                      record_id = record_id,
+                                      record_url = record_url,
+                                      record_title = record_title
+                                    ))
+                                  } else {
+                                    # No existing records found
+                                    return(list(
+                                      found = FALSE,
+                                      message = "DOI not found on Zenodo",
+                                      record_url = ""
+                                    ))
+                                  }
+                                } else {
+                                  cat("DEBUG: Search failed with status:", status, "\n")
+                                  return(list(found = FALSE, message = paste("❌ Search failed with status:", status)))
+                                }
+                                
+                              }, error = function(e) {
+                                cat("ERROR in DOI search:", e$message, "\n")
+                                return(list(found = FALSE, message = paste("❌ Search error:", e$message)))
+                              })
                             }
                           )
   )
@@ -517,6 +632,45 @@ server <- function(input, output, session) {
       # Store data
       values$bib_data <- list(df = df, bib = entry)  # Store only first entry
       
+      # Automatically check DOI after loading BibTeX
+      cat("DEBUG: === AUTOMATIC DOI CHECK ===\n")
+      bibentry <- entry[[1]]
+      doi_val <- tryCatch(bibentry$doi, error = function(e) NULL)
+      
+      if (is.null(doi_val) || doi_val == "") {
+        cat("DEBUG: No DOI found in publication\n")
+        values$doi_check_results <- "No DOI found"
+        values$duplicate_found <- FALSE
+        values$zenodo_record_url <- ""
+        showNotification("Publication loaded. No DOI found for duplicate checking.")
+      } else {
+        cat("DEBUG: Found DOI, checking automatically:", doi_val, "\n")
+        
+        # Initialize Zenodo client for search (no token needed for public search)
+        zenodo <- ZenodoClient$new("dummy_token_for_search")
+        
+        tryCatch({
+          search_result <- zenodo$search_doi(doi_val)
+          
+          values$doi_check_results <- search_result$message
+          values$duplicate_found <- search_result$found
+          values$zenodo_record_url <- search_result$record_url %||% ""
+          
+          if (search_result$found) {
+            showNotification("⚠️ Duplicate found! Upload disabled.", type = "warning", duration = 10)
+          } else {
+            showNotification("✅ No duplicate found. Safe to upload!", type = "message", duration = 5)
+          }
+          
+        }, error = function(e) {
+          cat("ERROR in automatic DOI check:", e$message, "\n")
+          values$doi_check_results <- paste("Error checking DOI:", e$message)
+          values$duplicate_found <- FALSE
+          values$zenodo_record_url <- ""
+          showNotification("Publication loaded. DOI check failed.")
+        })
+      }
+      
       showNotification("Successfully loaded publication (first entry from BibTeX)")
       
     }, error = function(e) {
@@ -543,7 +697,11 @@ server <- function(input, output, session) {
       # Store the original file input for later use
       values$pdf_data <- list(df = pdf_df, files = input$pdf_files)
       
-      showNotification(paste("Loaded", nrow(pdf_df), "PDF files. The first one will be uploaded."))
+      if (nrow(pdf_df) == 1) {
+        showNotification("PDF file loaded and ready for upload.")
+      } else {
+        showNotification(paste("Loaded", nrow(pdf_df), "PDF files. The first one will be uploaded with the publication."))
+      }
       
     }, error = function(e) {
       showNotification(paste("Error processing PDF files:", e$message))
@@ -606,6 +764,12 @@ server <- function(input, output, session) {
     # Validation
     if (is.null(values$bib_data)) {
       showNotification("Please upload a BibTeX file first")
+      return()
+    }
+    
+    # Check for duplicates
+    if (values$duplicate_found) {
+      showNotification("❌ Upload blocked: Duplicate found on Zenodo!", type = "error")
       return()
     }
     
@@ -705,6 +869,55 @@ server <- function(input, output, session) {
   output$upload_results <- renderText({
     values$upload_results %||% "No uploads yet"
   })
+  
+  # Show/hide alert conditions
+  output$show_duplicate_warning <- reactive({
+    values$duplicate_found == TRUE
+  })
+  outputOptions(output, "show_duplicate_warning", suspendWhenHidden = FALSE)
+  
+  output$show_safe_upload <- reactive({
+    !is.null(values$bib_data) && values$duplicate_found == FALSE && 
+      !is.null(values$doi_check_results) && values$doi_check_results != "" && 
+      !values$duplicate_found
+  })
+  outputOptions(output, "show_safe_upload", suspendWhenHidden = FALSE)
+  
+  output$show_no_doi <- reactive({
+    !is.null(values$bib_data) && !is.null(values$doi_check_results) && 
+      grepl("No DOI", values$doi_check_results)
+  })
+  outputOptions(output, "show_no_doi", suspendWhenHidden = FALSE)
+  
+  # Disable upload if duplicate found
+  output$upload_disabled <- reactive({
+    values$duplicate_found == TRUE
+  })
+  outputOptions(output, "upload_disabled", suspendWhenHidden = FALSE)
+  
+  # Duplicate info display
+  output$duplicate_info <- renderUI({
+    if (values$duplicate_found && values$zenodo_record_url != "") {
+      tagList(
+        tags$a(href = values$zenodo_record_url, target = "_blank", 
+               class = "btn btn-outline-primary btn-sm",
+               "🔗 View Existing Record on Zenodo"),
+        br(), br(),
+        tags$small("Record URL: ", tags$code(values$zenodo_record_url))
+      )
+    }
+  })
+  
+  # DOI Check Result Output (keep for backward compatibility)
+  output$doi_check_result <- renderText({
+    values$doi_check_results %||% ""
+  })
+  
+  # Show/hide DOI check result panel (keep for backward compatibility)
+  output$show_doi_result <- reactive({
+    !is.null(values$doi_check_results) && values$doi_check_results != ""
+  })
+  outputOptions(output, "show_doi_result", suspendWhenHidden = FALSE)
   
   # Always show the link button
   output$zenodo_url <- reactive({
