@@ -12,6 +12,7 @@ from datetime import date
 from pathlib import Path
 
 import bibtexparser
+from bibtexparser.model import Entry as BibEntry
 import pandas as pd
 import requests
 import streamlit as st
@@ -100,26 +101,34 @@ def _strip_braces(s: str) -> str:
     return re.sub(r"[{}]", "", s).strip()
 
 
+def _field(entry: BibEntry, key: str, default: str = "") -> str:
+    """Get a field value from a bibtexparser v2 Entry, stripping LaTeX braces."""
+    f = entry.get(key)
+    return _strip_braces(str(f.value)) if f is not None else default
+
+
 def _names_match(a: str, b: str) -> bool:
     norm = lambda s: re.sub(r"[^a-z]", "", s.lower())
     return norm(a) == norm(b)
 
 
 def bibtex_to_zenodo(
-    entry: dict,
+    entry: BibEntry,
     access_type: str = "open",
     grants: list | None = None,
     orcid_map: dict | None = None,
 ) -> dict:
-    """Build Zenodo metadata payload from a bibtexparser entry dict."""
-    bib_type = entry.get("ENTRYTYPE", "article").lower()
+    """Build Zenodo metadata payload from a bibtexparser v2 Entry."""
+    bib_type = entry.entry_type.lower()
     upload_type, pub_type = ENTRY_TYPE_MAP.get(bib_type, ("publication", "article"))
 
+    title = _field(entry, "title", "Untitled")
+
     meta: dict = {
-        "title":       _strip_braces(entry.get("title", "Untitled")),
-        "upload_type": upload_type,
+        "title":        title,
+        "upload_type":  upload_type,
         "access_right": access_type,
-        "language":    "eng",
+        "language":     "eng",
     }
 
     if pub_type:
@@ -129,11 +138,11 @@ def bibtex_to_zenodo(
         meta["license"] = "CC-BY-4.0"
 
     # Description / abstract
-    abstract = entry.get("abstract", "")
-    meta["description"] = _strip_braces(abstract) if abstract else meta["title"]
+    abstract = _field(entry, "abstract")
+    meta["description"] = abstract if abstract else title
 
     # Publication date
-    year = entry.get("year", "").strip()
+    year = _field(entry, "year")
     if year.isdigit() and 1900 < int(year) <= 2100:
         meta["publication_date"] = f"{year}-01-01"
     else:
@@ -141,13 +150,13 @@ def bibtex_to_zenodo(
 
     # Creators / authors (with optional ORCID lookup)
     creators: list[dict] = []
-    raw_authors = entry.get("author", "")
+    raw_authors = _field(entry, "author")
     if raw_authors:
         for auth in re.split(r"\s+and\s+", raw_authors, flags=re.IGNORECASE):
             auth = auth.strip()
             if not auth:
                 continue
-            creator: dict = {"name": _strip_braces(auth)}
+            creator: dict = {"name": auth}
             if orcid_map:
                 for name_key, orcid in orcid_map.items():
                     if _names_match(auth, name_key):
@@ -157,7 +166,7 @@ def bibtex_to_zenodo(
     meta["creators"] = creators or [{"name": "Unknown Author"}]
 
     # Journal / publication metadata
-    field_map = {
+    bib_to_zen = {
         "journal": "journal_title",
         "volume":  "journal_volume",
         "number":  "journal_issue",
@@ -166,13 +175,13 @@ def bibtex_to_zenodo(
         "issn":    "issn",
         "isbn":    "isbn",
     }
-    for bib_key, zen_key in field_map.items():
-        val = entry.get(bib_key, "")
+    for bib_key, zen_key in bib_to_zen.items():
+        val = _field(entry, bib_key)
         if val:
-            meta[zen_key] = _strip_braces(val)
+            meta[zen_key] = val
 
     # Keywords
-    kw = entry.get("keywords", "")
+    kw = _field(entry, "keywords")
     if kw:
         meta["keywords"] = [k.strip() for k in re.split(r"[,;]", kw) if k.strip()]
 
@@ -250,19 +259,18 @@ def upload_to_zenodo(
 # ─── BibTeX parsing ───────────────────────────────────────────────────────────
 
 
-def parse_bibtex(content: str) -> list[dict]:
-    parser = bibtexparser.bparser.BibTexParser(common_strings=True)
-    parser.ignore_nonstandard_types = False
-    db = bibtexparser.loads(content, parser=parser)
-    return db.entries
+def parse_bibtex(content: str) -> list[BibEntry]:
+    """Parse BibTeX string with bibtexparser v2."""
+    lib = bibtexparser.parse_string(content)
+    return lib.entries
 
 
-def entry_label(e: dict) -> str:
+def entry_label(e: BibEntry) -> str:
     """Short human-readable label for selectbox."""
-    first_author = re.split(r"\s+and\s+", e.get("author", "Unknown"), flags=re.IGNORECASE)[0]
-    first_author = _strip_braces(first_author).strip()
-    year  = e.get("year", "")
-    title = _strip_braces(e.get("title", ""))[:70]
+    raw_author = _field(e, "author", "Unknown")
+    first_author = re.split(r"\s+and\s+", raw_author, flags=re.IGNORECASE)[0].strip()
+    year  = _field(e, "year")
+    title = _field(e, "title")[:70]
     return f"{first_author} ({year}) — {title}"
 
 
@@ -382,20 +390,20 @@ def main() -> None:
                 if selected_entry:
                     with st.expander("Entry details", expanded=True):
                         display = {
-                            "BibTeX key": selected_entry.get("ID", ""),
-                            "Type":       selected_entry.get("ENTRYTYPE", ""),
-                            "Title":      _strip_braces(selected_entry.get("title", "")),
-                            "Authors":    selected_entry.get("author", ""),
-                            "Year":       selected_entry.get("year", ""),
-                            "Journal":    selected_entry.get("journal", ""),
-                            "DOI":        selected_entry.get("doi", ""),
-                            "Keywords":   selected_entry.get("keywords", ""),
+                            "BibTeX key": selected_entry.key,
+                            "Type":       selected_entry.entry_type,
+                            "Title":      _field(selected_entry, "title"),
+                            "Authors":    _field(selected_entry, "author"),
+                            "Year":       _field(selected_entry, "year"),
+                            "Journal":    _field(selected_entry, "journal"),
+                            "DOI":        _field(selected_entry, "doi"),
+                            "Keywords":   _field(selected_entry, "keywords"),
                         }
                         df = pd.DataFrame.from_dict(display, orient="index", columns=["Value"])
                         st.dataframe(df, use_container_width=True)
 
                     # Auto DOI duplicate check
-                    doi = selected_entry.get("doi", "").strip()
+                    doi = _field(selected_entry, "doi")
                     if doi:
                         with st.spinner("Checking Zenodo for duplicates…"):
                             doi_status = check_doi_on_zenodo(doi, sandbox=sandbox_mode)

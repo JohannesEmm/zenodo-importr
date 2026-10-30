@@ -1,6 +1,8 @@
 *
 !zenodo-importr.R
 !zenodo_importer.py
+!zenodo_importer.spec
+!run.py
 !requirements.txt
 !launch.bat
 !README.md
@@ -10,3 +12,7 @@
 .venv/
 __pycache__/
 *.pyc
+
+# PyInstaller build artifacts (too large for git — run pyinstaller zenodo_importer.spec to rebuild)
+build/
+dist/
