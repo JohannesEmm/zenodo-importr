@@ -18,17 +18,21 @@ A Python/Streamlit web app that streamlines uploading academic publications to Z
 
 ## Quick Start (Windows)
 
-1. Install **Python 3.10+** from <https://python.org> (tick "Add Python to PATH")
+**Option A — Double-click the pre-built exe** (no Python needed):
+```
+dist\ZenodoImporter.exe
+```
+
+**Option B — Run from source** (requires Python 3.10+):
+1. Install Python from <https://python.org> (tick "Add Python to PATH")
 2. Double-click **`launch.bat`**
 
-The script creates a virtual environment, installs dependencies, and opens the app in your browser automatically.
-
-## Manual Start
-
+**Rebuild the exe after code changes:**
 ```bash
-pip install -r requirements.txt
-streamlit run zenodo_importer.py
+pip install pyinstaller
+pyinstaller zenodo_importer.spec
 ```
+The single-file exe appears at `dist\ZenodoImporter.exe`.
 
 ## Usage
 
@@ -69,8 +73,8 @@ streamlit run zenodo_importer.py
 
 ```
 Python 3.10+
-streamlit
-bibtexparser
+customtkinter
+bibtexparser >= 2.0
 requests
 pandas
 openpyxl
