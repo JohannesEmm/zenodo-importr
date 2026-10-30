@@ -1,2 +1,12 @@
 *
 !zenodo-importr.R
+!zenodo_importer.py
+!requirements.txt
+!launch.bat
+!README.md
+!.gitignore
+
+# Python virtual environment (created by launch.bat)
+.venv/
+__pycache__/
+*.pyc

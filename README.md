@@ -1,171 +1,97 @@
-# Zenodo BibTeX Importer (zenodo-importr)
+# Zenodo BibTeX Importer
 
-A Shiny application that streamlines the process of uploading academic publications to Zenodo. This tool automatically processes BibTeX files and uploads publications with attached PDF files to your Zenodo repository.
+A Python/Streamlit web app that streamlines uploading academic publications to Zenodo. Load a BibTeX file and an optional PDF, and the tool handles metadata formatting and the Zenodo API upload — including automatic duplicate detection.
 
-## 🚀 Features
+> The original R/Shiny implementation is preserved as `zenodo-importr.R`.
 
-- **Simple BibTeX Processing**: Upload BibTeX files and automatically extract publication metadata
-- **PDF Attachment**: Automatically attach PDF files to your publications
-- **Zenodo Integration**: Direct upload to Zenodo via API with proper metadata formatting
-- **EC Grant Support**: Add European Commission grant numbers to your publications
-- **Author ORCID Integration**: Optional Excel-based author ORCID configuration
-- **Access Control**: Support for both open access and closed access publications
-- **Auto-Publishing**: Option to automatically publish uploads or save as drafts
+## Features
 
-## 📋 Prerequisites
+- **BibTeX parsing** – supports all common entry types (article, inproceedings, book, thesis, techreport, …)
+- **Multi-entry selection** – when a `.bib` file has multiple entries, pick the one to upload
+- **Automatic duplicate detection** – checks Zenodo by DOI before upload and blocks duplicates
+- **PDF attachment** – attach the full-text PDF to the deposition
+- **ORCID auto-matching** – load an Excel file with author names and ORCIDs; they are attached automatically
+- **EC Grant support** – add European Commission grant numbers
+- **Metadata preview** – inspect the exact JSON sent to Zenodo before committing
+- **Sandbox mode** – test uploads against `sandbox.zenodo.org` without touching production
+- **Persistent settings** – token, default access type, and ORCID table are stored locally (`~/.zenodo_importer_config.json`)
 
-- R (version 4.0 or higher)
-- Zenodo account with API access token
-- Required R packages (see Installation)
+## Quick Start (Windows)
 
-## 🛠️ Installation
+1. Install **Python 3.10+** from <https://python.org> (tick "Add Python to PATH")
+2. Double-click **`launch.bat`**
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yourusername/zenodo-bibtex-importer.git
-   cd zenodo-bibtex-importer
-   ```
+The script creates a virtual environment, installs dependencies, and opens the app in your browser automatically.
 
-2. **Set up Zenodo API Token:**
-   - Go to [Zenodo Token Settings](https://zenodo.org/account/settings/applications/tokens/new/)
-   - Create a new token with `deposit:write` scope
-   - Copy the token for use in the application
+## Manual Start
 
-## 🎯 How to Use
-
-### Step 1: Start the Application
-```r
-# Run the Shiny app
-source("app.R")  # or whatever you name your main file
-shinyApp(ui = ui, server = server)
+```bash
+pip install -r requirements.txt
+streamlit run zenodo_importer.py
 ```
 
-### Step 2: Upload Your Files
-1. **Upload BibTeX File**: Choose a `.bib` file containing your publication(s)
-   - Only the first entry will be processed and uploaded
-   - The app will display publication details for review
+## Usage
 
-2. **Upload PDF File**: Choose a PDF file to attach to your publication
-   - If multiple PDFs are selected, only the first one will be used
-   - The PDF will be automatically attached to the publication
+### Upload tab
 
-### Step 3: Configure Upload Settings
-- **Access Token**: Enter your Zenodo API token
-- **Access Type**: Choose between "Open Access" or "Closed Access"
-- **Auto-publish**: Enable to automatically publish after upload (otherwise saves as draft)
-- **EC Grants**: Optionally add European Commission grant numbers (one per line)
+| Step | Action |
+|------|--------|
+| 1 | Upload a `.bib` file. If it contains multiple entries, select the one to upload. The DOI is checked against Zenodo automatically. |
+| 2 | Upload a PDF (optional). |
+| 3 | Set the access token, access type, and any EC grant numbers. |
+| 4 | Click **Upload to Zenodo**. |
 
-### Step 4: Upload to Zenodo
-- Click "Upload to Zenodo" to start the process
-- Monitor the console output for detailed progress information
-- View your uploads on Zenodo using the provided link
+### Settings tab
 
-## 📁 File Structure
+- **Zenodo Access Token** – saved to disk; not required on every launch.
+  [Generate a token ↗](https://zenodo.org/account/settings/applications/tokens/new/) (needs `deposit:write` scope)
+- **Default Access Type** – open or closed access
+- **Sandbox mode** – use `sandbox.zenodo.org` for testing (requires a separate sandbox token)
+- **Author ORCID Mapping** – upload an Excel file with **Name** and **ORCID** columns
+
+## Supported BibTeX Fields
+
+| BibTeX field | Zenodo field |
+|---|---|
+| title | title |
+| author | creators |
+| abstract | description |
+| year | publication_date |
+| journal | journal_title |
+| volume | journal_volume |
+| number | journal_issue |
+| pages | journal_pages |
+| doi | doi / related_identifiers |
+| keywords | keywords |
+| issn / isbn | issn / isbn |
+
+## Requirements
 
 ```
-zenodo-bibtex-importer/
-├── app.R                 # Main Shiny application
-├── README.md            # This file
-└── examples/
-    ├── sample.bib       # Example BibTeX file
-    └── authors.xlsx     # Example ORCID configuration
+Python 3.10+
+streamlit
+bibtexparser
+requests
+pandas
+openpyxl
 ```
 
-## ⚙️ Configuration Options
+## Troubleshooting
 
-### Author ORCID Configuration (Optional)
-Create an Excel file with the following columns:
-- `Name`: Author name as it appears in your BibTeX
-- `ORCID`: Corresponding ORCID identifier
+| Error | Likely cause |
+|---|---|
+| HTTP 403 | Token missing `deposit:write` scope or wrong environment (sandbox vs. production) |
+| HTTP 400 | Invalid metadata (e.g. a grant ID not in Zenodo's database) |
+| PDF upload fails | File too large or network timeout; try again |
+| BibTeX parse errors | Non-standard encoding or malformed file; open in JabRef and re-export |
 
-Upload this file in the "Settings" tab to automatically add ORCID IDs to your publications.
+## Technical Notes
 
-### Grant Numbers
-Enter European Commission grant numbers in the text area, one per line. Example:
-```
-101022622
-956811
-```
-
-## 🔧 Technical Details
-
-### Supported Metadata Fields
-The tool extracts and uploads the following metadata from BibTeX:
-- Title
-- Authors (with optional ORCID integration)
-- Abstract/Description
-- Publication date
-- Journal information (title, volume, issue, pages)
-- DOI
-- Publication type
-- Language (defaults to English)
-
-### API Integration
-- Uses Zenodo REST API v1
-- Production Zenodo only (no sandbox support)
-- Requires `deposit:write` permission scope
-- Supports file uploads up to Zenodo's limits
-
-### File Upload Process
-1. Creates a new deposition on Zenodo
-2. Uploads metadata in JSON format
-3. Uploads PDF file to the deposition bucket
-4. Optionally publishes the deposition
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**"Access forbidden" error:**
-- Check that your API token has `deposit:write` scope
-- Ensure you're using a production Zenodo token (not sandbox)
-- Verify the token is correctly entered in the application
-
-**PDF not uploading:**
-- Ensure PDF file exists and is accessible
-- Check file size doesn't exceed Zenodo limits
-- Verify PDF file format is valid
-
-**BibTeX parsing errors:**
-- Ensure BibTeX file is valid and properly formatted
-- Check that the first entry contains required fields (title, author)
-- Try with a simplified BibTeX entry for testing
-
-### Debug Information
-The application provides detailed console output for troubleshooting:
-- File upload progress
-- API response codes
-- Metadata processing details
-- Error messages with specific failure reasons
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 🙏 Acknowledgments
-
-- [Zenodo](https://zenodo.org/) for providing the repository platform and API
-- [RefManageR](https://docs.ropensci.org/RefManageR/) for BibTeX processing
-- [Shiny](https://shiny.rstudio.com/) for the web application framework
-
-## 📞 Support
-
-If you encounter issues or have questions:
-1. Check the troubleshooting section above
-2. Review the console output for error details
-3. Open an issue on GitHub with detailed information about your problem
-
-## 🔗 Related Links
-
-- [Zenodo API Documentation](https://developers.zenodo.org/)
-- [BibTeX Format Guide](https://en.wikipedia.org/wiki/BibTeX)
-- [ORCID Identifier System](https://orcid.org/)
-- [European Commission Grant Database](https://cordis.europa.eu/)
+- Uses the [Zenodo REST API v1](https://developers.zenodo.org/)
+- Deposition flow: create → upload file → (optionally) publish
+- All uploads start as **drafts** unless "Auto-publish" is checked
+- Config is stored at `~/.zenodo_importer_config.json` (your home directory)
 
 ---
 
-**Note**: This tool uploads to production Zenodo. Test uploads will appear in your actual Zenodo account. Use caution and consider the implications before publishing.
+**Warning:** uploads without sandbox mode go to production Zenodo. Published records cannot be deleted — only new versions can be added.
