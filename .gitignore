@@ -1,4 +1,7 @@
 *
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
 !zenodo-importr.R
 !zenodo_importer.py
 !zenodo_importer.spec

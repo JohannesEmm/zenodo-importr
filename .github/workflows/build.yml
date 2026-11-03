@@ -1,0 +1,60 @@
+name: Build & Release
+
+# Runs on every push to pystandalone, or manually via the Actions tab.
+# Builds the standalone exe on Windows, Linux, and macOS, then uploads
+# all three zips as assets to the v1.0.0 GitHub Release.
+on:
+  push:
+    branches:
+      - pystandalone
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: ZenodoImporter-windows-x64.zip
+            zip_cmd: pwsh -Command "Compress-Archive -Path dist/ZenodoImporter -DestinationPath ZenodoImporter-windows-x64.zip"
+
+          - os: ubuntu-latest
+            asset: ZenodoImporter-linux-x64.zip
+            zip_cmd: cd dist && zip -r ../ZenodoImporter-linux-x64.zip ZenodoImporter
+
+          - os: macos-latest
+            asset: ZenodoImporter-macos-x64.zip
+            zip_cmd: cd dist && zip -r ../ZenodoImporter-macos-x64.zip ZenodoImporter
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Tkinter is not bundled with python.org builds on Linux
+      - name: Install system Tkinter (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y python3-tk
+
+      - name: Install Python dependencies
+        run: pip install customtkinter bibtexparser requests pandas openpyxl pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller zenodo_importer.spec --noconfirm
+
+      - name: Zip output
+        run: ${{ matrix.zip_cmd }}
+
+      - name: Upload to GitHub Release v1.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          files: ${{ matrix.asset }}
+          # Adds assets to the existing release; does not overwrite other assets
