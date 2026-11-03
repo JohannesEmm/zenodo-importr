@@ -9,6 +9,9 @@ on:
       - pystandalone
   workflow_dispatch:
 
+permissions:
+  contents: write   # required to upload assets to GitHub Releases
+
 jobs:
   build:
     strategy:
